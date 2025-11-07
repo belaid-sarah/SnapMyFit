@@ -15,43 +15,7 @@ const Camera: React.FC = () => {
   const { user, updateUserPoints } = useAuth();
   const navigate = useNavigate();
 
-  // Mock fashion items for demo
-  const mockFashionItems: FashionItem[] = [
-    {
-      id: '1',
-      imageUrl: 'https://images.pexels.com/photos/1464625/pexels-photo-1464625.jpeg',
-      brand: 'Zara',
-      name: 'Oversized Blazer',
-      description: 'Classic tailored blazer with structured shoulders and a relaxed fit. Perfect for professional and casual styling.',
-      price: 89.90,
-      category: 'Blazers',
-      color: 'Navy Blue',
-      confidence: 92,
-      tags: ['business', 'casual', 'oversized'],
-      shoppingLinks: [
-        { store: 'Zara', url: '#', price: 89.90, availability: 'in-stock' },
-        { store: 'H&M', url: '#', price: 79.99, availability: 'limited' },
-        { store: 'ASOS', url: '#', price: 95.00, availability: 'in-stock' }
-      ]
-    },
-    {
-      id: '2',
-      imageUrl: 'https://images.pexels.com/photos/1536619/pexels-photo-1536619.jpeg',
-      brand: 'Nike',
-      name: 'Air Max 270',
-      description: 'Comfortable lifestyle sneaker with Max Air unit for all-day comfort and modern street style appeal.',
-      price: 150.00,
-      category: 'Sneakers',
-      color: 'White/Black',
-      confidence: 88,
-      tags: ['athletic', 'casual', 'comfort'],
-      shoppingLinks: [
-        { store: 'Nike', url: '#', price: 150.00, availability: 'in-stock' },
-        { store: 'Foot Locker', url: '#', price: 150.00, availability: 'in-stock' },
-        { store: 'JD Sports', url: '#', price: 145.00, availability: 'limited' }
-      ]
-    }
-  ];
+  const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
 
   const handleImageCapture = async (imageData: string) => {
     if (!user) {
@@ -68,19 +32,54 @@ const Camera: React.FC = () => {
     setIsAnalyzing(true);
     setError('');
 
-    // Simulate AI analysis
-    setTimeout(() => {
-      const confidence = Math.floor(Math.random() * 30) + 70; // 70-100%
-      setConfidence(confidence);
-      setSearchResults(mockFashionItems);
-      setIsAnalyzing(false);
+    try {
+      // Convertir dataURL en Blob
+      const res = await fetch(imageData);
+      const blob = await res.blob();
+
+      const formData = new FormData();
+      formData.append('file', new File([blob], 'capture.jpg', { type: 'image/jpeg' }));
+
+      const response = await fetch(`${API_BASE}/search`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Search failed: ${response.status} ${response.statusText} - ${errorText}`);
+      }
+
+      const data = await response.json();
+      console.log('📦 Données reçues de l\'API:', data);
       
-      // Award points for search
+      const items: FashionItem[] = (data.results || []).map((r: any, idx: number) => ({
+        id: r.path || r.ref || String(idx),
+        imageUrl: r.imageUrl.startsWith('http') ? r.imageUrl : `${API_BASE}${r.imageUrl}`,
+        brand: r.brand || r.type || data.type || 'Unknown',
+        name: r.name || r.ref || 'Similar item',
+        description: `Item similaire (${r.category || r.type || 'unknown'}) - Référence: ${r.ref || 'N/A'}`,
+        price: r.price || Math.floor(Math.random() * 80) + 20,
+        category: r.category || r.type || data.type || 'unknown',
+        color: 'N/A',
+        confidence: Math.floor(Math.random() * 20) + 80, // placeholder 80-100
+        tags: [r.category || r.type || 'similar'],
+        shoppingLinks: [
+          { store: 'Store A', url: '#', price: r.price || Math.floor(Math.random() * 80) + 20, availability: 'in-stock' },
+          { store: 'Store B', url: '#', price: r.price || Math.floor(Math.random() * 80) + 20, availability: 'limited' },
+        ],
+      }));
+
+      setConfidence(Math.floor(Math.random() * 20) + 80);
+      setSearchResults(items);
       updateUserPoints(5);
-      
-      // Decrease searches remaining (in real app, this would be handled by backend)
-      // This is just for demo purposes
-    }, 3000);
+    } catch (e: any) {
+      console.error('❌ Erreur lors de la recherche:', e);
+      const errorMsg = e?.message || 'Failed to analyze image';
+      setError(`Erreur: ${errorMsg}. Vérifiez que l'API est démarrée sur ${API_BASE}`);
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   const resetSearch = () => {
