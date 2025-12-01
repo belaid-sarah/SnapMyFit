@@ -21,9 +21,9 @@ services:
       - ../backend/images:/app/images
       - ../backend/results:/app/results
       - ../backend/uploads:/app/uploads
-      # Montage des fichiers de données (index FAISS, JSON) - optionnel, créés automatiquement si absents
-      # Note: Les fichiers FAISS seront créés dans /app/ et persistés dans le conteneur
-      # Pour les sauvegarder sur l'hôte, copiez-les manuellement ou utilisez docker cp
+      # Montage des fichiers de données (index FAISS, JSON)
+      - ../backend/metadata:/app/metadata
+      - ../backend/embeddings:/app/embeddings
     depends_on:
       - db
       - redis

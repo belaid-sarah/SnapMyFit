@@ -17,7 +17,7 @@ def rebuild_class_indexes():
     print(f"📊 Classes disponibles: {list(search_engine.class_to_index.keys())}")
     for cls, idx in search_engine.class_to_index.items():
         count = search_engine.class_to_indices.get(cls, [])
-        print(f"   {cls}: {len(count)} images, index: faiss_index_{cls}.bin")
+        print(f"   {cls}: {len(count)} images, index: embeddings/faiss_index_{cls}.bin")
 
 if __name__ == "__main__":
     rebuild_class_indexes()

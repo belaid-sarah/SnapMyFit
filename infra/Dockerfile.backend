@@ -34,7 +34,7 @@ RUN pip install --no-cache-dir Pillow
 COPY backend/ /app/
 
 # Créer les dossiers nécessaires
-RUN mkdir -p /app/images /app/results /app/uploads
+RUN mkdir -p /app/images /app/results /app/uploads /app/embeddings /app/metadata
 
 # Définir PYTHONPATH pour que les imports fonctionnent
 ENV PYTHONPATH=/app

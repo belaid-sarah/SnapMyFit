@@ -29,13 +29,20 @@ TYPES = ["robe", "jupe", "t-shirt", "pantalon", "short", "veste", "chemise"]
 
 def initialize():
     global model, preprocess, index, image_paths, image_labels, class_to_indices, image_metadata, class_to_index
+    import time
 
     if model is not None:
         return  # déjà initialisé
 
-    print("🔄 Initialisation de CLIP et FAISS...")
+    init_start = time.time()
+    print("🔄 [INIT] Initialisation de CLIP et FAISS...")
+    
     # Charger CLIP
+    print("📦 [INIT] Chargement du modèle CLIP ViT-B/32...")
+    clip_start = time.time()
     model, preprocess = clip.load("ViT-B/32", device=device)
+    clip_elapsed = time.time() - clip_start
+    print(f"✅ [INIT] CLIP chargé en {clip_elapsed:.2f}s (device: {device})")
 
     # Charger les images de référence
     IMG_DIR = "images"
@@ -43,63 +50,141 @@ def initialize():
     image_paths = []
     # Charger toutes les images de la racine images/
     if img_dir.exists():
+        print(f"📂 [INIT] Scan du dossier images/...")
         for f in img_dir.iterdir():
             if f.is_file() and f.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}:
                 image_paths.append(str(f))
-    image_paths = sorted(set(image_paths))
+        image_paths = sorted(set(image_paths))
+        print(f"   → {len(image_paths)} images trouvées")
+    else:
+        print(f"⚠️ [INIT] Dossier images/ non trouvé")
 
     # Fichiers de cache
-    INDEX_FILE = Path("faiss_index.bin")
-    PATHS_FILE = Path("image_paths.json")
-    LABELS_FILE = Path("image_labels.json")
-    META_FILE = Path("image_metadata.json")
+    INDEX_FILE = Path("embeddings/faiss_index.bin")
+    PATHS_FILE = Path("metadata/image_paths.json")
+    LABELS_FILE = Path("metadata/image_labels.json")
+    META_FILE = Path("metadata/image_metadata.json")
 
     # Charger chemins des images (ordre stable) si existant
+    print(f"📄 [INIT] Chargement des métadonnées...")
     if PATHS_FILE.exists():
         with open(PATHS_FILE, "r") as f:
             image_paths = json.load(f)
+        print(f"   → {len(image_paths)} chemins chargés depuis {PATHS_FILE}")
     else:
         image_paths = sorted(image_paths)
         with open(PATHS_FILE, "w") as f:
             json.dump(image_paths, f)
+        print(f"   → {len(image_paths)} chemins sauvegardés dans {PATHS_FILE}")
 
     # Charger labels depuis JSON (format: {"images\\file.jpg": "robe", ...})
     if LABELS_FILE.exists():
+        print(f"   → Chargement des labels depuis {LABELS_FILE}...")
+        import sys
+        sys.stdout.flush()
         with open(LABELS_FILE, "r", encoding="utf-8") as f:
             raw_labels = json.load(f)
-            # Normaliser les chemins (Windows backslash -> forward slash pour compatibilité)
-            image_labels = {}
-            for k, v in raw_labels.items():
-                # Normaliser le chemin pour correspondre aux image_paths
-                normalized = str(Path(k)).replace("\\", "/")
-                # Chercher le chemin correspondant dans image_paths
-                for p in image_paths:
-                    if Path(p).as_posix() == Path(normalized).as_posix() or str(Path(p).name) == Path(k).name:
-                        image_labels[p] = v
-                        break
-                else:
-                    # Si pas trouvé, essayer avec le chemin original
-                    if Path(k).exists():
-                        image_labels[k] = v
+        print(f"   → {len(raw_labels)} labels chargés")
+        sys.stdout.flush()
+        # Normaliser les chemins (Windows backslash -> forward slash pour compatibilité)
+        print(f"   → Mapping des labels aux chemins... (13752 labels, cela peut prendre 10-30 secondes)")
+        import sys
+        sys.stdout.flush()
+        
+        # Optimisation: créer un index des noms de fichiers pour recherche rapide
+        image_labels = {}
+        path_by_name = {Path(p).name: p for p in image_paths}
+        path_by_posix = {Path(p).as_posix(): p for p in image_paths}
+        
+        mapped_count = 0
+        total_labels = len(raw_labels)
+        for idx, (k, v) in enumerate(raw_labels.items()):
+            # Afficher progression tous les 1000 labels
+            if idx % 1000 == 0 and idx > 0:
+                print(f"   → Progression: {idx}/{total_labels} labels traités...")
+                sys.stdout.flush()
+            
+            # Normaliser le chemin
+            normalized = str(Path(k)).replace("\\", "/")
+            normalized_posix = Path(normalized).as_posix()
+            file_name = Path(k).name
+            
+            # Chercher d'abord par chemin complet, puis par nom de fichier
+            if normalized_posix in path_by_posix:
+                image_labels[path_by_posix[normalized_posix]] = v
+                mapped_count += 1
+            elif file_name in path_by_name:
+                image_labels[path_by_name[file_name]] = v
+                mapped_count += 1
+            elif Path(k).exists():
+                image_labels[k] = v
+                mapped_count += 1
+        
+        print(f"   → {mapped_count} labels mappés aux chemins")
+        sys.stdout.flush()
     else:
+        print(f"   ⚠️ Fichier {LABELS_FILE} non trouvé, aucun label chargé")
         image_labels = {}
 
     # Charger métadonnées optionnelles
     if META_FILE.exists():
+        print(f"   → Chargement des métadonnées depuis {META_FILE}...")
         with open(META_FILE, "r", encoding="utf-8") as f:
             image_metadata = json.load(f)
+        print(f"   → {len(image_metadata)} métadonnées chargées")
     else:
+        print(f"   ⚠️ Fichier {META_FILE} non trouvé, métadonnées vides")
         image_metadata = {}
 
     # Construire ou charger l'index FAISS global
+    print("📦 [INIT] Chargement de l'index FAISS global...")
+    faiss_start = time.time()
     if INDEX_FILE.exists():
-        index = faiss.read_index(str(INDEX_FILE))
+        index_size_mb = INDEX_FILE.stat().st_size / (1024 * 1024)
+        print(f"   → Fichier trouvé: {INDEX_FILE} ({index_size_mb:.2f} MB)")
+        print(f"   → Début du chargement FAISS... (cela peut prendre 10-60 secondes sur HDD)")
+        print(f"   → Si ça prend trop de temps, vérifiez votre antivirus ou le type de disque")
+        
+        # Afficher un message toutes les 10 secondes pour montrer que ça progresse
+        import sys
+        sys.stdout.flush()
+        
+        try:
+            # Charger l'index FAISS (peut être lent sur HDD ou si antivirus scanne)
+            print(f"   → Lecture du fichier en cours... (patientez)")
+            sys.stdout.flush()
+            
+            # Essayer de charger avec un indicateur de progression
+            index = faiss.read_index(str(INDEX_FILE))
+            faiss_elapsed = time.time() - faiss_start
+            print(f"✅ [INIT] Index global chargé en {faiss_elapsed:.2f}s ({index.ntotal} vecteurs)")
+            sys.stdout.flush()
+        except Exception as e:
+            faiss_elapsed = time.time() - faiss_start
+            print(f"❌ [INIT] Erreur lors du chargement de l'index après {faiss_elapsed:.2f}s: {e}")
+            print(f"   → Tentative de reconstruction...")
+            # Reconstruire l'index si le fichier est corrompu
+            if image_paths and len(image_paths) > 0:
+                print(f"   → Reconstruction depuis {len(image_paths)} images (cela peut prendre plusieurs minutes)...")
+                embeddings = np.vstack([get_embedding(p) for p in image_paths]).astype("float32")
+                dimension = embeddings.shape[1]
+                index = faiss.IndexFlatL2(dimension)
+                index.add(embeddings)
+                faiss.write_index(index, str(INDEX_FILE))
+                print(f"✅ [INIT] Index reconstruit et sauvegardé")
+            else:
+                print(f"⚠️ [INIT] Pas d'images disponibles, index non créé")
+                index = None
     else:
+        print(f"⚠️ [INIT] Index global non trouvé, construction depuis les images...")
+        print(f"   → Cela peut prendre du temps pour {len(image_paths)} images...")
         embeddings = np.vstack([get_embedding(p) for p in image_paths]).astype("float32")
         dimension = embeddings.shape[1]
         index = faiss.IndexFlatL2(dimension)
         index.add(embeddings)
         faiss.write_index(index, str(INDEX_FILE))
+        faiss_elapsed = time.time() - faiss_start
+        print(f"✅ [INIT] Index global construit et sauvegardé en {faiss_elapsed:.2f}s")
 
     # Construire ou charger des index FAISS par classe (si dataset organisé ou labels déjà partiels)
     class_to_indices = {t: [] for t in TYPES}
@@ -108,23 +193,52 @@ def initialize():
         if t in class_to_indices:
             class_to_indices[t].append(i)
 
+    # Charger les index par classe
+    print("📦 [INIT] Chargement des index FAISS par classe...")
+    import sys
+    sys.stdout.flush()
+    class_start = time.time()
     class_to_index = {}
+    loaded_classes = []
     for t in TYPES:
         indices = class_to_indices.get(t, [])
         if not indices:
             continue
-        idx_path = Path(f"faiss_index_{t}.bin")
+        idx_path = Path(f"embeddings/faiss_index_{t}.bin")
         if idx_path.exists():
-            class_to_index[t] = faiss.read_index(str(idx_path))
+            idx_size_mb = idx_path.stat().st_size / (1024 * 1024)
+            print(f"   → Chargement de l'index '{t}' ({idx_size_mb:.2f} MB)...")
+            sys.stdout.flush()
+            try:
+                class_to_index[t] = faiss.read_index(str(idx_path))
+                loaded_classes.append(f"{t} ({len(indices)} images, {idx_size_mb:.2f} MB)")
+                print(f"   ✅ Index '{t}' chargé")
+                sys.stdout.flush()
+            except Exception as e:
+                print(f"   ⚠️ Erreur lors du chargement de l'index '{t}': {e}")
+                print(f"   → L'index sera reconstruit à la prochaine recherche")
+                sys.stdout.flush()
         else:
             # Reconstituer les vecteurs à partir de l'index global
+            print(f"   → Construction de l'index pour '{t}' ({len(indices)} images)...")
             xb = np.vstack([index.reconstruct(i) for i in indices]).astype("float32")
             sub_index = faiss.IndexFlatL2(xb.shape[1])
             sub_index.add(xb)
             faiss.write_index(sub_index, str(idx_path))
             class_to_index[t] = sub_index
+            loaded_classes.append(f"{t} ({len(indices)} images, construit)")
+    
+    class_elapsed = time.time() - class_start
+    if loaded_classes:
+        print(f"✅ [INIT] {len(loaded_classes)} index par classe chargés en {class_elapsed:.2f}s")
+        for cls_info in loaded_classes:
+            print(f"   → {cls_info}")
+    else:
+        print(f"⚠️ [INIT] Aucun index par classe disponible")
 
-    print(f"✅ Index prêt avec {len(image_paths)} images.")
+    total_elapsed = time.time() - init_start
+    print(f"✅ [INIT] Initialisation complète en {total_elapsed:.2f}s")
+    print(f"📊 [INIT] Index prêt avec {len(image_paths)} images au total.")
 
 def get_embedding(image_path: str) -> np.ndarray:
     global model, preprocess
@@ -169,8 +283,10 @@ def search_image(query_img: str, k: int = 5):
     global index, image_paths, image_labels, class_to_indices, class_to_index
     import time
     
+    # Vérifier que l'initialisation a été faite (normalement au démarrage)
     if index is None:
-        initialize()  # initialise seulement au premier appel
+        print("⚠️ [SEARCH] Index non initialisé, initialisation en cours...")
+        initialize()  # fallback si pas initialisé au démarrage
 
     search_start = time.time()
     
@@ -226,7 +342,7 @@ def search_image(query_img: str, k: int = 5):
             break
 
     if updated:
-        with open("image_labels.json", "w", encoding="utf-8") as f:
+        with open("metadata/image_labels.json", "w", encoding="utf-8") as f:
             json.dump(image_labels, f)
 
     result = filtered[:k] if filtered else top_candidates[:k]

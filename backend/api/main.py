@@ -11,11 +11,39 @@ import uuid
 
 import search_engine
 
-# Initialisation lazy : CLIP se charge à la première requête (plus rapide au démarrage)
+# Initialisation au démarrage : CLIP et FAISS se chargent immédiatement
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: API démarre immédiatement, CLIP se chargera à la première requête
-    print("🚀 [STARTUP] API démarrée - CLIP se chargera à la première requête")
+    # Startup: Précharger CLIP et FAISS pour éviter le délai à la première requête
+    print("🚀 [STARTUP] Démarrage de l'API...")
+    print("⏳ [STARTUP] Préchargement de CLIP et FAISS en arrière-plan...")
+    import time
+    import threading
+    
+    startup_start = time.time()
+    
+    # Précharger CLIP et FAISS dans un thread pour ne pas bloquer le démarrage
+    def init_in_background():
+        try:
+            search_engine.initialize()
+            startup_elapsed = time.time() - startup_start
+            print(f"✅ [STARTUP] Modèle CLIP et index FAISS prêts en {startup_elapsed:.2f}s")
+        except Exception as e:
+            startup_elapsed = time.time() - startup_start
+            print(f"⚠️ [STARTUP] Erreur lors de l'initialisation après {startup_elapsed:.2f}s: {e}")
+            print(f"⚠️ [STARTUP] L'initialisation se fera à la première requête")
+    
+    # Démarrer l'initialisation en arrière-plan (daemon=True pour ne pas bloquer l'arrêt)
+    init_thread = threading.Thread(target=init_in_background, daemon=True)
+    init_thread.start()
+    
+    # Attendre 2 secondes pour voir si CLIP charge rapidement
+    time.sleep(2)
+    
+    print(f"🌐 [STARTUP] API prête sur http://localhost:8000")
+    print(f"   → L'initialisation complète se fait en arrière-plan (peut prendre 1-2 minutes)")
+    print(f"   → Les premières requêtes peuvent être lentes jusqu'à ce que FAISS soit chargé")
+    
     yield
     # Shutdown (optionnel)
     print("🛑 [SHUTDOWN] Arrêt de l'API")

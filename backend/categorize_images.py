@@ -52,7 +52,9 @@ def categorize(images_root: str, dry_run: bool = False):
 
     # Sauvegarder labels
     if not dry_run and search_engine.image_labels is not None:
-        with open(images_dir.parent / "image_labels.json", "w", encoding="utf-8") as f:
+        metadata_dir = images_dir.parent / "metadata"
+        metadata_dir.mkdir(exist_ok=True)
+        with open(metadata_dir / "image_labels.json", "w", encoding="utf-8") as f:
             import json
             json.dump(search_engine.image_labels, f)
 

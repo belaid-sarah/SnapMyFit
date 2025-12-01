@@ -7,11 +7,11 @@ from pathlib import Path
 
 def generate_references():
     """Génère image_metadata.json avec des références pour chaque image."""
-    labels_file = Path("image_labels.json")
-    meta_file = Path("image_metadata.json")
+    labels_file = Path("metadata/image_labels.json")
+    meta_file = Path("metadata/image_metadata.json")
     
     if not labels_file.exists():
-        print("❌ image_labels.json n'existe pas. Lancez d'abord categorize_images.py")
+        print("❌ metadata/image_labels.json n'existe pas. Lancez d'abord categorize_images.py")
         return
     
     # Charger les labels

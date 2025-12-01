@@ -4,5 +4,5 @@ Set-Location $PSScriptRoot
 Write-Host "📍 Répertoire: $(Get-Location)" -ForegroundColor Cyan
 Write-Host "🌐 L'API sera accessible sur: http://localhost:8000" -ForegroundColor Yellow
 Write-Host "⏳ Chargement de CLIP (cela peut prendre 30-60 secondes la première fois)..." -ForegroundColor Yellow
-python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload
+python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 
