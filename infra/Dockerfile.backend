@@ -1,0 +1,47 @@
+# Dockerfile pour le backend SnapMyFit
+FROM python:3.11-slim
+
+# Installer les dépendances système nécessaires pour PyTorch, FAISS, et PIL
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libopenblas-dev \
+    libomp-dev \
+    wget \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Définir le répertoire de travail
+WORKDIR /app
+
+# Copier les requirements d'abord pour optimiser le cache Docker
+COPY backend/api/requirements.txt /app/requirements.txt
+
+# Installer les dépendances Python de base
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Installer PyTorch CPU (pour commencer, peut être changé pour CUDA si nécessaire)
+RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+# Installer CLIP et FAISS
+RUN pip install --no-cache-dir \
+    git+https://github.com/openai/CLIP.git \
+    faiss-cpu
+
+# Installer Pillow pour le traitement d'images
+RUN pip install --no-cache-dir Pillow
+
+# Copier tout le code backend
+COPY backend/ /app/
+
+# Créer les dossiers nécessaires
+RUN mkdir -p /app/images /app/results /app/uploads
+
+# Définir PYTHONPATH pour que les imports fonctionnent
+ENV PYTHONPATH=/app
+
+# Exposer le port
+EXPOSE 8000
+
+# Commande par défaut
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+

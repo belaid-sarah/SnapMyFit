@@ -7,6 +7,7 @@ from pathlib import Path
 import tempfile
 import shutil
 import time
+import uuid
 
 import search_engine
 
@@ -24,15 +25,25 @@ app = FastAPI(title="SnapMyFit API", lifespan=lifespan)
 # Ajouter CORS pour permettre les requêtes depuis le frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
+    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173", "http://localhost"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Servir le dossier images pour l'affichage côté frontend
+# Dossiers de stockage
 images_path = Path(__file__).resolve().parents[1] / "images"
+results_path = Path(__file__).resolve().parents[1] / "results"
+uploads_path = Path(__file__).resolve().parents[1] / "uploads"
+
+# Créer les dossiers s'ils n'existent pas
+results_path.mkdir(exist_ok=True)
+uploads_path.mkdir(exist_ok=True)
+
+# Servir le dossier images pour l'affichage côté frontend
 app.mount("/images", StaticFiles(directory=str(images_path)), name="images")
+# Servir le dossier results pour les résultats de recherche
+app.mount("/results", StaticFiles(directory=str(results_path)), name="results")
 
 @app.get("/")
 def root():
@@ -62,6 +73,28 @@ async def search(file: UploadFile = File(...)):
         elapsed = time.time() - start_time
         print(f"⚡ [API] Recherche terminée en {elapsed:.2f}s")
         print(f"📋 [API] Catégorie: {predicted_type}, {len(results)} résultats")
+        
+        # Sauvegarder les résultats dans un dossier dédié
+        search_id = uuid.uuid4().hex
+        result_folder = results_path / search_id
+        result_folder.mkdir(exist_ok=True)
+        
+        # Copier l'image uploadée dans uploads/ et les résultats dans results/
+        uploaded_filename = f"{search_id}{suffix}"
+        uploaded_path = uploads_path / uploaded_filename
+        shutil.copy2(temp_path, uploaded_path)
+        print(f"💾 [API] Image uploadée sauvegardée: {uploaded_path}")
+        
+        # Copier les images de résultats
+        saved_results = []
+        for p in results:
+            p_path = Path(p)
+            result_filename = p_path.name
+            result_dest = result_folder / result_filename
+            shutil.copy2(p, result_dest)
+            saved_results.append(str(result_dest))
+            print(f"💾 [API] Résultat copié: {result_dest}")
+        
         base_url_prefix = "/images/"
         items = []
         for p in results:
@@ -87,8 +120,11 @@ async def search(file: UploadFile = File(...)):
                 "price": meta.get("price"),
                 "meta": meta  # Garder pour compatibilité
             })
+        
+        print(f"✅ [API] Recherche {search_id} sauvegardée avec {len(saved_results)} résultats")
         return JSONResponse({
             "type": predicted_type,
+            "searchId": search_id,
             "results": items
         })
     finally:
